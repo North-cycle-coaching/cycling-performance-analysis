@@ -33,8 +33,14 @@ def calculate_cp_w_map(powers, durations=[180,360,720]):
     return cp, w_prime, map_power, fractional_utilisation
 
 # Streamlit App
-st.title("Cycling Performance & Lactate Analysis")
+st.set_page_config(layout="wide")
+st.title("Elite Cycling Physiology Analysis")
 
+# Athlete Profile
+st.sidebar.header("Athlete Profile")
+weight = st.sidebar.number_input("Athlete Weight (kg)", value=70.0)
+
+# FIT File Analysis
 st.header("1. Upload .fit Files for CP Calculation")
 uploaded_files = st.file_uploader("Upload multiple .fit files", accept_multiple_files=True)
 
@@ -52,23 +58,20 @@ if uploaded_files:
 
         cp, w_prime, map_power, fractional_utilisation = calculate_cp_w_map([p3,p6,p12])
 
-        st.subheader("Critical Power Analysis")
-        st.write(f"**3-min Peak Power:** {p3:.1f} W")
-        st.write(f"**6-min Peak Power:** {p6:.1f} W")
-        st.write(f"**12-min Peak Power:** {p12:.1f} W")
-        st.write(f"**Critical Power (CP):** {cp:.1f} W")
-        st.write(f"**W′:** {w_prime:.1f} J")
-        st.write(f"**MAP:** {map_power:.1f} W")
-        st.write(f"**Fractional Utilisation:** {fractional_utilisation:.2%}")
+        cp_rel = cp / weight
+        map_rel = map_power / weight
 
-        st.header("2. Suggested Test Stages")
-        increments = [0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,1.0,1.05,1.1]
-        stages = [cp * inc for inc in increments]
-        stages_df = pd.DataFrame({"Stage": range(1,len(stages)+1), "Wattage (W)": np.round(stages,1)})
-        st.table(stages_df)
+        st.subheader("Critical Power & Aerobic Profile")
+        cols = st.columns(2)
+        cols[0].metric("Critical Power (W)", f"{cp:.1f}")
+        cols[1].metric("Critical Power (W/kg)", f"{cp_rel:.2f}")
+        cols[0].metric("MAP (W)", f"{map_power:.1f}")
+        cols[1].metric("MAP (W/kg)", f"{map_rel:.2f}")
+        st.metric("W′ (Anaerobic Capacity)", f"{w_prime:.0f} J")
 
-        st.header("3. Manual Entry of Lactate Test Data")
-        num_stages = st.number_input("Number of stages completed", min_value=1, max_value=12, value=6)
+        st.header("2. Manual Entry of Lactate & Performance Data")
+        baseline_lactate = st.number_input("Baseline Lactate (mmol/L)", value=1.2)
+        num_stages = st.number_input("Number of stages", min_value=1, max_value=12, value=6)
 
         with st.form("lactate_form"):
             lactate_data = []
@@ -79,33 +82,41 @@ if uploaded_files:
                 lactate = st.number_input(f"Lactate (mmol/L) Stage {i+1}", key=f"lactate_{i}")
                 lactate_data.append([watts, hr, lactate])
 
-            submit = st.form_submit_button("Analyse Lactate Data")
+            st.subheader("40s Max Effort")
+            peak_40s_power = st.number_input("Peak 40s Power (W)")
+            peak_lactate_40s = st.number_input("Peak Lactate after 40s (mmol/L)")
+
+            submit = st.form_submit_button("Analyse Physiological Data")
 
         if submit:
             lactate_df = pd.DataFrame(lactate_data, columns=['Watts','HR','Lactate'])
-            st.table(lactate_df)
+            lactate_df.insert(0, 'Stage', np.arange(1, num_stages+1))
 
-            st.header("4. Lactate Threshold Analysis")
-            fig, ax = plt.subplots()
-            ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o')
-            ax.set_xlabel('Watts')
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o', linewidth=2)
+            ax.axhline(4, color='r', linestyle='--', label='LT2 (~4 mmol/L)')
+            ax.axhline(2, color='g', linestyle='--', label='LT1 (~2 mmol/L)')
+            ax.axhline(baseline_lactate, color='blue', linestyle='--', label='Baseline')
+            ax.scatter(peak_40s_power, peak_lactate_40s, color='purple', s=100, label='Peak Lactate (40s Effort)')
+            ax.set_xlabel('Power (W)')
             ax.set_ylabel('Lactate (mmol/L)')
-            ax.set_title('Lactate Curve')
+            ax.set_title('Detailed Lactate Curve')
+            ax.legend()
             st.pyplot(fig)
 
-            st.header("5. Combined Insights")
-            peak_lactate = lactate_df['Lactate'].max()
             lt2_watts = lactate_df.iloc[(lactate_df['Lactate'] - 4).abs().argsort()[:1]]['Watts'].values[0]
             lt1_watts = lactate_df.iloc[(lactate_df['Lactate'] - 2).abs().argsort()[:1]]['Watts'].values[0]
 
-            st.write(f"**Peak Lactate:** {peak_lactate:.2f} mmol/L")
-            st.write(f"**LT2 Watts (~4 mmol/L):** {lt2_watts:.1f} W")
-            st.write(f"**LT1 Watts (~2 mmol/L):** {lt1_watts:.1f} W")
+            st.subheader("Advanced Physiological Insights")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Peak Lactate (40s)", f"{peak_lactate_40s:.2f} mmol/L")
+            col2.metric("LT2 Power (~4 mmol/L)", f"{lt2_watts:.1f} W")
+            col3.metric("LT1 Power (~2 mmol/L)", f"{lt1_watts:.1f} W")
 
-            st.subheader("Integrated Analysis")
-            st.write(f"- **W′ ({w_prime:.0f} J) vs Peak Lactate ({peak_lactate:.2f} mmol/L)**")
-            st.write(f"- **CP ({cp:.1f} W) vs LT2 ({lt2_watts:.1f} W)** Difference: {cp - lt2_watts:.1f} W")
-            st.write(f"- **LT1 ({lt1_watts:.1f} W) vs Fractional Utilisation ({fractional_utilisation:.2%})**")
+            st.markdown("### Elite Integrated Analysis")
+            st.markdown(f"- **Anaerobic Capacity (W′)** clearly related to maximal lactate tolerance: {w_prime:.0f} J vs {peak_lactate_40s:.2f} mmol/L.")
+            st.markdown(f"- **Critical Power ({cp:.1f} W)** vs **LT2 ({lt2_watts:.1f} W)** highlighting aerobic sustainability.")
+            st.markdown(f"- **Baseline to LT1** clearly indicates aerobic efficiency at {lt1_watts:.1f} W.")
 
     else:
         st.error("Not enough data for analysis (minimum 12 minutes required).")
