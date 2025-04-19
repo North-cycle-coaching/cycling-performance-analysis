@@ -69,54 +69,41 @@ if uploaded_files:
         cols[1].metric("MAP (W/kg)", f"{map_rel:.2f}")
         st.metric("W′ (Anaerobic Capacity)", f"{w_prime:.0f} J")
 
-        st.header("2. Manual Entry of Lactate & Performance Data")
-        baseline_lactate = st.number_input("Baseline Lactate (mmol/L)", value=1.2)
-        num_stages = st.number_input("Number of stages", min_value=1, max_value=12, value=6)
+        st.header("2. Upload Lactate & Performance CSV")
+        lactate_csv = st.file_uploader("Upload CSV", type=["csv"])
 
-        with st.form("lactate_form"):
-            lactate_data = []
-            for i in range(num_stages):
-                st.subheader(f"Stage {i+1}")
-                watts = st.number_input(f"Watts Stage {i+1}", key=f"watts_{i}")
-                hr = st.number_input(f"Heart Rate Stage {i+1}", key=f"hr_{i}")
-                lactate = st.number_input(f"Lactate (mmol/L) Stage {i+1}", key=f"lactate_{i}")
-                lactate_data.append([watts, hr, lactate])
+        if lactate_csv:
+            lactate_df = pd.read_csv(lactate_csv)
+            baseline_lactate = lactate_df['Baseline_Lactate'][0]
+            peak_40s_power = lactate_df['Peak_Power_40s'][0]
+            peak_lactate_40s = lactate_df['Peak_Lactate_40s'][0]
 
-            st.subheader("40s Max Effort")
-            peak_40s_power = st.number_input("Peak 40s Power (W)")
-            peak_lactate_40s = st.number_input("Peak Lactate after 40s (mmol/L)")
-
-            submit = st.form_submit_button("Analyse Physiological Data")
-
-        if submit:
-            lactate_df = pd.DataFrame(lactate_data, columns=['Watts','HR','Lactate'])
-            lactate_df.insert(0, 'Stage', np.arange(1, num_stages+1))
-
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o', linewidth=2)
-            ax.axhline(4, color='r', linestyle='--', label='LT2 (~4 mmol/L)')
-            ax.axhline(2, color='g', linestyle='--', label='LT1 (~2 mmol/L)')
-            ax.axhline(baseline_lactate, color='blue', linestyle='--', label='Baseline')
-            ax.scatter(peak_40s_power, peak_lactate_40s, color='purple', s=100, label='Peak Lactate (40s Effort)')
-            ax.set_xlabel('Power (W)')
-            ax.set_ylabel('Lactate (mmol/L)')
-            ax.set_title('Detailed Lactate Curve')
+            fig, ax = plt.subplots(figsize=(12,6))
+            ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o', linewidth=3, color='blue')
+            ax.axhline(4, color='red', linestyle='--', label='LT2 (~4 mmol/L)')
+            ax.axhline(2, color='green', linestyle='--', label='LT1 (~2 mmol/L)')
+            ax.axhline(baseline_lactate, color='purple', linestyle='--', label='Baseline')
+            ax.scatter(peak_40s_power, peak_lactate_40s, color='orange', s=120, label='Peak Lactate (40s)')
+            ax.set_xlabel('Power (W)', fontsize=14)
+            ax.set_ylabel('Lactate (mmol/L)', fontsize=14)
+            ax.set_title('Detailed Lactate Curve', fontsize=16)
             ax.legend()
             st.pyplot(fig)
 
             lt2_watts = lactate_df.iloc[(lactate_df['Lactate'] - 4).abs().argsort()[:1]]['Watts'].values[0]
             lt1_watts = lactate_df.iloc[(lactate_df['Lactate'] - 2).abs().argsort()[:1]]['Watts'].values[0]
 
-            st.subheader("Advanced Physiological Insights")
+            st.subheader("Elite Integrated Physiological Insights")
             col1, col2, col3 = st.columns(3)
             col1.metric("Peak Lactate (40s)", f"{peak_lactate_40s:.2f} mmol/L")
             col2.metric("LT2 Power (~4 mmol/L)", f"{lt2_watts:.1f} W")
             col3.metric("LT1 Power (~2 mmol/L)", f"{lt1_watts:.1f} W")
 
-            st.markdown("### Elite Integrated Analysis")
-            st.markdown(f"- **Anaerobic Capacity (W′)** clearly related to maximal lactate tolerance: {w_prime:.0f} J vs {peak_lactate_40s:.2f} mmol/L.")
-            st.markdown(f"- **Critical Power ({cp:.1f} W)** vs **LT2 ({lt2_watts:.1f} W)** highlighting aerobic sustainability.")
-            st.markdown(f"- **Baseline to LT1** clearly indicates aerobic efficiency at {lt1_watts:.1f} W.")
+            st.markdown("---")
+            st.markdown("### World-Class Physiological Summary")
+            st.markdown(f"- **Anaerobic Capacity (W′)** vs. **Peak Lactate**: `{w_prime:.0f} J` vs `{peak_lactate_40s:.2f} mmol/L`.")
+            st.markdown(f"- **Critical Power ({cp:.1f} W)** aligns with **LT2 ({lt2_watts:.1f} W)**, clearly defining aerobic sustainability.")
+            st.markdown(f"- **Aerobic efficiency** (Baseline to LT1) clearly observed at `{lt1_watts:.1f} W` (~{(lt1_watts/cp)*100:.1f}% CP).")
 
     else:
         st.error("Not enough data for analysis (minimum 12 minutes required).")
