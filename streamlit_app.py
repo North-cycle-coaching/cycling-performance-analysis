@@ -69,39 +69,43 @@ if uploaded_files:
 
         st.header("3. Manual Entry of Lactate Test Data")
         num_stages = st.number_input("Number of stages completed", min_value=1, max_value=12, value=6)
-        lactate_data = []
 
-        for i in range(num_stages):
-            st.subheader(f"Stage {i+1}")
-            watts = st.number_input(f"Watts Stage {i+1}", key=f"watts_{i}")
-            hr = st.number_input(f"Heart Rate Stage {i+1}", key=f"hr_{i}")
-            lactate = st.number_input(f"Lactate (mmol/L) Stage {i+1}", key=f"lactate_{i}")
-            lactate_data.append([watts, hr, lactate])
+        with st.form("lactate_form"):
+            lactate_data = []
+            for i in range(num_stages):
+                st.subheader(f"Stage {i+1}")
+                watts = st.number_input(f"Watts Stage {i+1}", key=f"watts_{i}")
+                hr = st.number_input(f"Heart Rate Stage {i+1}", key=f"hr_{i}")
+                lactate = st.number_input(f"Lactate (mmol/L) Stage {i+1}", key=f"lactate_{i}")
+                lactate_data.append([watts, hr, lactate])
 
-        lactate_df = pd.DataFrame(lactate_data, columns=['Watts','HR','Lactate'])
-        st.table(lactate_df)
+            submit = st.form_submit_button("Analyse Lactate Data")
 
-        st.header("4. Lactate Threshold Analysis")
-        fig, ax = plt.subplots()
-        ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o')
-        ax.set_xlabel('Watts')
-        ax.set_ylabel('Lactate (mmol/L)')
-        ax.set_title('Lactate Curve')
-        st.pyplot(fig)
+        if submit:
+            lactate_df = pd.DataFrame(lactate_data, columns=['Watts','HR','Lactate'])
+            st.table(lactate_df)
 
-        st.header("5. Combined Insights")
-        peak_lactate = lactate_df['Lactate'].max()
-        lt2_watts = lactate_df.iloc[(lactate_df['Lactate'] - 4).abs().argsort()[:1]]['Watts'].values[0]
-        lt1_watts = lactate_df.iloc[(lactate_df['Lactate'] - 2).abs().argsort()[:1]]['Watts'].values[0]
+            st.header("4. Lactate Threshold Analysis")
+            fig, ax = plt.subplots()
+            ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o')
+            ax.set_xlabel('Watts')
+            ax.set_ylabel('Lactate (mmol/L)')
+            ax.set_title('Lactate Curve')
+            st.pyplot(fig)
 
-        st.write(f"**Peak Lactate:** {peak_lactate:.2f} mmol/L")
-        st.write(f"**LT2 Watts (~4 mmol/L):** {lt2_watts:.1f} W")
-        st.write(f"**LT1 Watts (~2 mmol/L):** {lt1_watts:.1f} W")
+            st.header("5. Combined Insights")
+            peak_lactate = lactate_df['Lactate'].max()
+            lt2_watts = lactate_df.iloc[(lactate_df['Lactate'] - 4).abs().argsort()[:1]]['Watts'].values[0]
+            lt1_watts = lactate_df.iloc[(lactate_df['Lactate'] - 2).abs().argsort()[:1]]['Watts'].values[0]
 
-        st.subheader("Integrated Analysis")
-        st.write(f"- **W′ ({w_prime:.0f} J) vs Peak Lactate ({peak_lactate:.2f} mmol/L)**")
-        st.write(f"- **CP ({cp:.1f} W) vs LT2 ({lt2_watts:.1f} W)** Difference: {cp - lt2_watts:.1f} W")
-        st.write(f"- **LT1 ({lt1_watts:.1f} W) vs Fractional Utilisation ({fractional_utilisation:.2%})**")
+            st.write(f"**Peak Lactate:** {peak_lactate:.2f} mmol/L")
+            st.write(f"**LT2 Watts (~4 mmol/L):** {lt2_watts:.1f} W")
+            st.write(f"**LT1 Watts (~2 mmol/L):** {lt1_watts:.1f} W")
+
+            st.subheader("Integrated Analysis")
+            st.write(f"- **W′ ({w_prime:.0f} J) vs Peak Lactate ({peak_lactate:.2f} mmol/L)**")
+            st.write(f"- **CP ({cp:.1f} W) vs LT2 ({lt2_watts:.1f} W)** Difference: {cp - lt2_watts:.1f} W")
+            st.write(f"- **LT1 ({lt1_watts:.1f} W) vs Fractional Utilisation ({fractional_utilisation:.2%})**")
 
     else:
         st.error("Not enough data for analysis (minimum 12 minutes required).")
