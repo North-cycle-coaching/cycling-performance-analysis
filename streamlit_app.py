@@ -90,20 +90,30 @@ if uploaded_files:
             ax.legend()
             st.pyplot(fig)
 
-            lt2_watts = lactate_df.iloc[(lactate_df['Lactate'] - 4).abs().argsort()[:1]]['Watts'].values[0]
-            lt1_watts = lactate_df.iloc[(lactate_df['Lactate'] - 2).abs().argsort()[:1]]['Watts'].values[0]
+            # Precise LT calculations
+            def interpolate_threshold(df, target):
+                for i in range(1, len(df)):
+                    if df['Lactate'][i] >= target:
+                        x0, y0 = df['Watts'][i-1], df['Lactate'][i-1]
+                        x1, y1 = df['Watts'][i], df['Lactate'][i]
+                        return x0 + (target - y0) * (x1 - x0) / (y1 - y0)
+
+            lt1_watts = interpolate_threshold(lactate_df, 2.0)
+            lt2_watts = interpolate_threshold(lactate_df, 4.0)
+
+            hr_lt1 = np.interp(lt1_watts, lactate_df['Watts'], lactate_df['Heart_Rate'])
+            hr_lt2 = np.interp(lt2_watts, lactate_df['Watts'], lactate_df['Heart_Rate'])
 
             st.subheader("Elite Integrated Physiological Insights")
             col1, col2, col3 = st.columns(3)
             col1.metric("Peak Lactate (40s)", f"{peak_lactate_40s:.2f} mmol/L")
-            col2.metric("LT2 Power (~4 mmol/L)", f"{lt2_watts:.1f} W")
-            col3.metric("LT1 Power (~2 mmol/L)", f"{lt1_watts:.1f} W")
+            col2.metric("LT2 Power", f"{lt2_watts:.1f} W")
+            col3.metric("LT1 Power", f"{lt1_watts:.1f} W")
 
-            st.markdown("---")
-            st.markdown("### World-Class Physiological Summary")
-            st.markdown(f"- **Anaerobic Capacity (W′)** vs. **Peak Lactate**: `{w_prime:.0f} J` vs `{peak_lactate_40s:.2f} mmol/L`.")
-            st.markdown(f"- **Critical Power ({cp:.1f} W)** aligns with **LT2 ({lt2_watts:.1f} W)**, clearly defining aerobic sustainability.")
-            st.markdown(f"- **Aerobic efficiency** (Baseline to LT1) clearly observed at `{lt1_watts:.1f} W` (~{(lt1_watts/cp)*100:.1f}% CP).")
+            col1.metric("HR at LT1", f"{hr_lt1:.0f} bpm")
+            col2.metric("HR at LT2", f"{hr_lt2:.0f} bpm")
+            col3.metric("Fractional Utilisation", f"{fractional_utilisation*100:.1f}%")
 
     else:
         st.error("Not enough data for analysis (minimum 12 minutes required).")
+
