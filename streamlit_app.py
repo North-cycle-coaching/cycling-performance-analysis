@@ -4,6 +4,7 @@ import numpy as np
 import fitparse
 from io import BytesIO
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 # Helper functions
 def extract_power_from_fit(fitfile):
@@ -70,13 +71,21 @@ if uploaded_files:
         map_rel = map_power / weight
 
         st.subheader("Critical Power & Aerobic Profile")
-        cols = st.columns(2)
-        cols[0].metric("Critical Power (W)", f"{cp:.1f}")
-        cols[1].metric("Critical Power (W/kg)", f"{cp_rel:.2f}")
-        cols[0].metric("MAP (W)", f"{map_power:.1f}")
-        cols[1].metric("MAP (W/kg)", f"{map_rel:.2f}")
-        cols[0].metric("Fractional Utilisation", f"{fractional_utilisation*100:.1f}%")
-        cols[1].metric("W′ (Anaerobic Capacity)", f"{w_prime:.0f} J")
+        fig_cp = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = cp,
+            title = {'text': "Critical Power (W)"},
+            gauge = {'axis': {'range': [None, map_power*1.2]}, 'bar': {'color': "blue"}}
+        ))
+        st.plotly_chart(fig_cp)
+
+        fig_wprime = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = w_prime,
+            title = {'text': "W′ (J)"},
+            gauge = {'axis': {'range': [0, 30000]}, 'bar': {'color': "purple"}}
+        ))
+        st.plotly_chart(fig_wprime)
 
         st.header("2. Upload Lactate & Performance CSV")
         lactate_csv = st.file_uploader("Upload CSV", type=["csv"])
@@ -97,19 +106,24 @@ if uploaded_files:
             ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o', linewidth=3, color='blue')
             ax.axhline(4, color='red', linestyle='--', label='LT2 (~4 mmol/L)')
             ax.axhline(2, color='green', linestyle='--', label='LT1 (~2 mmol/L)')
-            ax.axvline(cp, color='purple', linestyle='--', label='Critical Power')
-            ax.axvline(map_power, color='orange', linestyle='--', label='MAP')
             ax.scatter([lt1_watts, lt2_watts], [2,4], color='black', s=100, label='Interpolated LT1 & LT2')
             ax.set_xlabel('Power (W)', fontsize=14)
             ax.set_ylabel('Lactate (mmol/L)', fontsize=14)
-            ax.set_title('Detailed Lactate & Intensity Domains', fontsize=16)
+            ax.set_title('Lactate Curve with Stage Data', fontsize=16)
             ax.legend()
             st.pyplot(fig)
 
-            st.subheader("Elite Integrated Physiological Insights")
-            st.markdown(f"**LT1 Power:** {lt1_watts:.1f} W | **HR:** {hr_lt1:.0f} bpm")
-            st.markdown(f"**LT2 Power:** {lt2_watts:.1f} W | **HR:** {hr_lt2:.0f} bpm")
-            st.markdown(f"**Critical Power (CP):** {cp:.1f} W ({fractional_utilisation*100:.1f}% of MAP)")
+            st.subheader("Final Elite Integrated Analysis")
+            cols = st.columns(3)
+            cols[0].metric("CP vs LT2", f"{cp:.1f} W vs {lt2_watts:.1f} W")
+            cols[1].metric("W′ vs Peak Lactate", f"{w_prime:.0f} J vs {peak_lactate_40s:.1f} mmol/L")
+            cols[2].metric("LT1 as % CP", f"{(lt1_watts/cp)*100:.1f}%")
 
+            fig_intensity = go.Figure()
+            fig_intensity.add_trace(go.Bar(x=['Moderate','Heavy','Severe','Extreme'], 
+                                           y=[lt1_watts, lt2_watts-lt1_watts, map_power-lt2_watts, map_power*0.2],
+                                           marker_color=['green','yellow','orange','red']))
+            fig_intensity.update_layout(title='Intensity Domains & Phase Transitions', xaxis_title='Domain', yaxis_title='Power (W)')
+            st.plotly_chart(fig_intensity)
     else:
         st.error("Not enough data for analysis (minimum 12 minutes required).")
