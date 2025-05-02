@@ -1,120 +1,97 @@
 import streamlit as st
 import pandas as pd
+from fitparse import FitFile
 import numpy as np
-import fitparse
-from io import BytesIO
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
 
-# Helper functions
-def extract_power_from_fit(fitfile):
-    power = []
-    for record in fitfile.get_messages('record'):
-        for data in record:
-            if data.name == 'power' and data.value is not None:
-                power.append(data.value)
-    return power
+st.set_page_config(page_title="Cycling Race File Analysis", layout="wide")
+st.title("Cycling Race Analysis Tool")
 
-def peak_power(power_data, duration_seconds):
-    rolling_avg = pd.Series(power_data).rolling(window=duration_seconds).mean()
-    return rolling_avg.max()
+# --- Sidebar Inputs ---
+st.sidebar.header("Upload & Rider Info")
+fit_file = st.sidebar.file_uploader("Upload .fit file", type=["fit"])
+body_weight = st.sidebar.number_input("Body weight (kg)", min_value=30.0, max_value=120.0, step=0.5)
+critical_power = st.sidebar.number_input("Critical Power (W)", min_value=100, max_value=500, step=1)
 
-def calculate_cp_w_map(powers, durations=[180,360,720]):
-    durations = np.array(durations)
-    inverse_durations = 1/durations
-    powers = np.array(powers)
+# --- Helper functions ---
+def semicircles_to_degrees(semicircles):
+    return semicircles * (180 / 2**31)
 
-    coeffs = np.polyfit(inverse_durations, powers, 1)
-    cp = coeffs[1]
-    w_prime = coeffs[0]
-    map_power = powers[0]
+def parse_fit(f):
+    fitfile = FitFile(f)
+    records = []
+    for record in fitfile.get_messages("record"):
+        r = {}
+        for field in record:
+            r[field.name] = field.value
+        records.append(r)
+    df = pd.DataFrame(records)
 
-    fractional_utilisation = cp / map_power
+    # Convert GPS
+    if 'position_lat' in df.columns:
+        df['position_lat'] = df['position_lat'].apply(semicircles_to_degrees)
+    if 'position_long' in df.columns:
+        df['position_long'] = df['position_long'].apply(semicircles_to_degrees)
 
-    return cp, w_prime, map_power, fractional_utilisation
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.sort_values('timestamp').reset_index(drop=True)
+    return df
 
-# Interpolation function for lactate thresholds
-def interpolate_threshold(df, target):
-    for i in range(1, len(df)):
-        if df['Lactate'][i] >= target:
-            x0, y0 = df['Watts'][i-1], df['Lactate'][i-1]
-            x1, y1 = df['Watts'][i], df['Lactate'][i]
-            return x0 + (target - y0) * (x1 - x0) / (y1 - y0)
+def calculate_race_impact(df, cp):
+    df['zone'] = pd.cut(
+        df['power'],
+        bins=[0, 0.95*cp, cp, 1.1*cp, 1.2*cp, 1.3*cp, np.inf],
+        labels=["<95%", "95-100%", "100-110%", "110-120%", "120-130%", ">130%"]
+    )
+    weights = {
+        "95-100%": 1/60,
+        "100-110%": 1.5/60,
+        "110-120%": 2.5/60,
+        "120-130%": 4/60,
+        ">130%": 6/60
+    }
+    ris = 0
+    for zone, group in df.groupby("zone"):
+        if zone in weights:
+            ris += len(group) * weights[zone]
+    return round(ris, 1)
 
-# Streamlit App
-st.set_page_config(layout="wide")
-st.title("Elite Cycling Physiology Analysis")
+def get_peak_power(df, durations):
+    peaks = {}
+    power = df['power'].fillna(0).to_numpy()
+    for d in durations:
+        window = int(d)
+        if len(power) >= window:
+            rolling = pd.Series(power).rolling(window).mean()
+            peaks[f"{d}s"] = int(rolling.max())
+        else:
+            peaks[f"{d}s"] = None
+    return peaks
 
-# Athlete Profile
-st.sidebar.header("Athlete Profile")
-weight = st.sidebar.number_input("Athlete Weight (kg)", value=70.0)
+# --- Main Logic ---
+if fit_file and critical_power and body_weight:
+    df = parse_fit(fit_file)
 
-# FIT File Analysis
-st.header("1. Upload .fit Files for CP Calculation")
-uploaded_files = st.file_uploader("Upload multiple .fit files", accept_multiple_files=True)
+    st.subheader("Hero Metrics")
+    peak_5min = get_peak_power(df, [300])["300s"]
+    ris = calculate_race_impact(df, critical_power)
 
-if uploaded_files:
-    all_power_data = []
-    for uploaded_file in uploaded_files:
-        fitfile = fitparse.FitFile(BytesIO(uploaded_file.read()))
-        power_data = extract_power_from_fit(fitfile)
-        all_power_data.extend(power_data)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Critical Power", f"{critical_power} W")
+    col2.metric("MAP (5-min)", f"{peak_5min} W")
+    col3.metric("Race Impact Score", f"{ris}")
 
-    if len(all_power_data) > 720:
-        p3 = peak_power(all_power_data, 180)
-        p6 = peak_power(all_power_data, 360)
-        p12 = peak_power(all_power_data, 720)
+    st.divider()
 
-        cp, w_prime, map_power, fractional_utilisation = calculate_cp_w_map([p3,p6,p12])
+    st.subheader("Peak Powers")
+    durations = [1, 10, 30, 60, 180, 300, 720]
+    peaks = get_peak_power(df, durations)
+    st.table(pd.DataFrame.from_dict(peaks, orient='index', columns=['Watts']))
 
-        cp_rel = cp / weight
-        map_rel = map_power / weight
+    st.divider()
 
-        st.subheader("Critical Power & Aerobic Profile")
-        cols = st.columns(2)
-        cols[0].metric("Critical Power (W)", f"{cp:.1f}")
-        cols[1].metric("Critical Power (W/kg)", f"{cp_rel:.2f}")
-        cols[0].metric("MAP (W)", f"{map_power:.1f}")
-        cols[1].metric("MAP (W/kg)", f"{map_rel:.2f}")
-        cols[0].metric("Fractional Utilisation", f"{fractional_utilisation*100:.1f}%")
-        cols[1].metric("W′ (Anaerobic Capacity)", f"{w_prime:.0f} J")
+    st.subheader("Raw Data Preview")
+    st.dataframe(df[['timestamp', 'power', 'heart_rate', 'cadence', 'speed', 'altitude']].head(200))
 
-        st.header("2. Upload Lactate & Performance CSV")
-        lactate_csv = st.file_uploader("Upload CSV", type=["csv"])
+else:
+    st.info("Upload a .fit file and input rider data to begin analysis.")
 
-        if lactate_csv:
-            lactate_df = pd.read_csv(lactate_csv)
-            baseline_lactate = lactate_df['Baseline_Lactate'][0]
-            peak_40s_power = lactate_df['Peak_Power_40s'][0]
-            peak_lactate_40s = lactate_df['Peak_Lactate_40s'][0]
-
-            lt1_watts = interpolate_threshold(lactate_df, 2.0)
-            lt2_watts = interpolate_threshold(lactate_df, 4.0)
-
-            hr_lt1 = np.interp(lt1_watts, lactate_df['Watts'], lactate_df['Heart_Rate'])
-            hr_lt2 = np.interp(lt2_watts, lactate_df['Watts'], lactate_df['Heart_Rate'])
-
-            fig, ax = plt.subplots(figsize=(12,6))
-            ax.plot(lactate_df['Watts'], lactate_df['Lactate'], marker='o', linewidth=3, color='blue')
-            ax.axhline(4, color='red', linestyle='--', label='LT2 (~4 mmol/L)')
-            ax.axhline(2, color='green', linestyle='--', label='LT1 (~2 mmol/L)')
-            ax.scatter([lt1_watts, lt2_watts], [2,4], color='black', s=100, label='Interpolated LT1 & LT2')
-            ax.set_xlabel('Power (W)', fontsize=14)
-            ax.set_ylabel('Lactate (mmol/L)', fontsize=14)
-            ax.set_title('Lactate Curve with Stage Data', fontsize=16)
-            ax.legend()
-            st.pyplot(fig)
-
-            st.subheader("Final Elite Integrated Analysis")
-            cols = st.columns(3)
-            cols[0].metric("CP vs LT2", f"{cp:.1f} W vs {lt2_watts:.1f} W")
-            cols[1].metric("W′ vs Peak Lactate", f"{w_prime:.0f} J vs {peak_lactate_40s:.1f} mmol/L")
-            cols[2].metric("LT1 as % CP", f"{(lt1_watts/cp)*100:.1f}%")
-
-            fig_intensity = plt.figure(figsize=(10,4))
-            plt.barh(['Moderate','Heavy','Severe','Extreme'], [lt1_watts, lt2_watts-lt1_watts, map_power-lt2_watts, map_power*0.2], color=['green','yellow','orange','red'])
-            plt.xlabel('Power (W)')
-            plt.title('Intensity Domains & Phase Transitions')
-            st.pyplot(fig_intensity)
-    else:
-        st.error("Not enough data for analysis (minimum 12 minutes required).")
