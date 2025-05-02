@@ -8,7 +8,7 @@ st.title("Cycling Race Analysis Tool")
 
 # --- Sidebar Inputs ---
 st.sidebar.header("Upload & Rider Info")
-fit_file = st.sidebar.file_uploader("Upload .fit file", type=["fit"])
+fit_file = st.sidebar.file_uploader("Upload .fit file")  # Removed strict type check
 body_weight = st.sidebar.number_input("Body weight (kg)", min_value=30.0, max_value=120.0, step=0.5)
 critical_power = st.sidebar.number_input("Critical Power (W)", min_value=100, max_value=500, step=1)
 
@@ -68,30 +68,34 @@ def get_peak_power(df, durations):
     return peaks
 
 # --- Main Logic ---
-if fit_file and critical_power and body_weight:
-    df = parse_fit(fit_file)
+if fit_file:
+    if not fit_file.name.lower().endswith('.fit'):
+        st.error("Please upload a .fit file.")
+    elif critical_power and body_weight:
+        df = parse_fit(fit_file)
 
-    st.subheader("Hero Metrics")
-    peak_5min = get_peak_power(df, [300])["300s"]
-    ris = calculate_race_impact(df, critical_power)
+        st.subheader("Hero Metrics")
+        peak_5min = get_peak_power(df, [300])["300s"]
+        ris = calculate_race_impact(df, critical_power)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Critical Power", f"{critical_power} W")
-    col2.metric("MAP (5-min)", f"{peak_5min} W")
-    col3.metric("Race Impact Score", f"{ris}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Critical Power", f"{critical_power} W")
+        col2.metric("MAP (5-min)", f"{peak_5min} W")
+        col3.metric("Race Impact Score", f"{ris}")
 
-    st.divider()
+        st.divider()
 
-    st.subheader("Peak Powers")
-    durations = [1, 10, 30, 60, 180, 300, 720]
-    peaks = get_peak_power(df, durations)
-    st.table(pd.DataFrame.from_dict(peaks, orient='index', columns=['Watts']))
+        st.subheader("Peak Powers")
+        durations = [1, 10, 30, 60, 180, 300, 720]
+        peaks = get_peak_power(df, durations)
+        st.table(pd.DataFrame.from_dict(peaks, orient='index', columns=['Watts']))
 
-    st.divider()
+        st.divider()
 
-    st.subheader("Raw Data Preview")
-    st.dataframe(df[['timestamp', 'power', 'heart_rate', 'cadence', 'speed', 'altitude']].head(200))
+        st.subheader("Raw Data Preview")
+        st.dataframe(df[['timestamp', 'power', 'heart_rate', 'cadence', 'speed', 'altitude']].head(200))
 
+    else:
+        st.info("Please enter your body weight and critical power.")
 else:
-    st.info("Upload a .fit file and input rider data to begin analysis.")
-
+    st.info("Upload a .fit file to begin analysis.")
