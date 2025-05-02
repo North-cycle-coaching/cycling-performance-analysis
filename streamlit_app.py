@@ -93,6 +93,39 @@ def detect_matches(df, cp):
     matches = df[above].groupby('match_group').filter(lambda x: len(x) >= 10)
     return matches['match_group'].nunique()
 
+def estimate_cp_wprime(peaks):
+    try:
+        p3 = peaks['180s']
+        p12 = peaks['720s']
+        if p3 is None or p12 is None:
+            return None, None
+        cp = int((p12 * 180 - p3 * 720) / (180 - 720))
+        wprime = int((p3 - cp) * 180)
+        return cp, wprime
+    except:
+        return None, None
+
+def detect_climbs(df):
+    if 'position_lat' not in df or 'altitude' not in df:
+        return pd.DataFrame()
+    df = df[['timestamp', 'position_lat', 'position_long', 'altitude']].dropna().copy()
+    df['delta_alt'] = df['altitude'].diff().fillna(0)
+    df['delta_dist'] = 0.0001  # assume ~10m step if GPS missing
+    df['gradient'] = (df['delta_alt'] / (df['delta_dist'] * 1000)) * 100
+    df['climb'] = df['gradient'] > 3
+    df['climb_group'] = (df['climb'] != df['climb'].shift()).cumsum()
+    climbs = df[df['climb']].groupby('climb_group').filter(lambda g: len(g) >= 30)
+    results = []
+    for name, g in climbs.groupby('climb_group'):
+        results.append({
+            'Start': g['timestamp'].iloc[0],
+            'End': g['timestamp'].iloc[-1],
+            'Duration (s)': (g['timestamp'].iloc[-1] - g['timestamp'].iloc[0]).total_seconds(),
+            'Elevation Gain (m)': round(g['altitude'].iloc[-1] - g['altitude'].iloc[0], 1),
+            'Avg Gradient (%)': round(g['gradient'].mean(), 2),
+        })
+    return pd.DataFrame(results)
+
 # --- Main Logic ---
 if fit_file:
     if not fit_file.name.lower().endswith('.fit'):
@@ -100,14 +133,19 @@ if fit_file:
     elif critical_power and body_weight:
         df = parse_fit(fit_file)
         ris, df = calculate_race_impact(df, critical_power)
-        peak_5min = get_peak_power(df, [300])["300s"]
+        peak_durations = [180, 300, 720]
+        peaks = get_peak_power(df, peak_durations)
+        map_5min = peaks['300s']
+        est_cp, est_wprime = estimate_cp_wprime(peaks)
 
         st.subheader("Hero Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Critical Power", f"{critical_power} W")
-        col2.metric("MAP (5-min)", f"{peak_5min} W")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Input CP", f"{critical_power} W")
+        col2.metric("MAP (5-min)", f"{map_5min} W")
         col3.metric("Race Impact Score", f"{ris}")
         col4.metric("Matches (120% CP)", detect_matches(df, critical_power))
+        if est_cp and est_wprime:
+            col5.metric("Modelled W′", f"{est_wprime} J")
 
         st.divider()
 
@@ -117,9 +155,8 @@ if fit_file:
         st.divider()
 
         st.subheader("Peak Powers (Whole Race)")
-        durations = [1, 10, 30, 60, 180, 300, 720]
-        peaks = get_peak_power(df, durations)
-        st.table(pd.DataFrame.from_dict(peaks, orient='index', columns=['Watts']))
+        all_peaks = get_peak_power(df, [1, 10, 30, 60, 180, 300, 720])
+        st.table(pd.DataFrame.from_dict(all_peaks, orient='index', columns=['Watts']))
 
         st.divider()
 
@@ -133,6 +170,15 @@ if fit_file:
 
         st.divider()
 
+        st.subheader("Detected Climbs")
+        climbs_df = detect_climbs(df)
+        if not climbs_df.empty:
+            st.dataframe(climbs_df)
+        else:
+            st.write("No climbs detected (requires altitude and GPS data).")
+
+        st.divider()
+
         st.subheader("Raw Data Preview")
         st.dataframe(df[['timestamp', 'power', 'heart_rate', 'cadence', 'speed', 'altitude']].head(200))
 
@@ -140,4 +186,3 @@ if fit_file:
         st.info("Please enter your body weight and critical power.")
 else:
     st.info("Upload a .fit file to begin analysis.")
-
