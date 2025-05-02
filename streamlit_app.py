@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 from fitparse import FitFile
 import numpy as np
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Cycling Race File Analysis", layout="wide")
 st.title("Cycling Race Analysis Tool")
 
 # --- Sidebar Inputs ---
 st.sidebar.header("Upload & Rider Info")
-fit_file = st.sidebar.file_uploader("Upload .fit file")  # Removed strict type check
+fit_file = st.sidebar.file_uploader("Upload .fit file")
 body_weight = st.sidebar.number_input("Body weight (kg)", min_value=30.0, max_value=120.0, step=0.5)
 critical_power = st.sidebar.number_input("Critical Power (W)", min_value=100, max_value=500, step=1)
 
@@ -25,15 +26,13 @@ def parse_fit(f):
             r[field.name] = field.value
         records.append(r)
     df = pd.DataFrame(records)
-
-    # Convert GPS
     if 'position_lat' in df.columns:
         df['position_lat'] = df['position_lat'].apply(semicircles_to_degrees)
     if 'position_long' in df.columns:
         df['position_long'] = df['position_long'].apply(semicircles_to_degrees)
-
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.sort_values('timestamp').reset_index(drop=True)
+    df['seconds'] = (df['timestamp'] - df['timestamp'].iloc[0]).dt.total_seconds().astype(int)
     return df
 
 def calculate_race_impact(df, cp):
@@ -53,7 +52,7 @@ def calculate_race_impact(df, cp):
     for zone, group in df.groupby("zone"):
         if zone in weights:
             ris += len(group) * weights[zone]
-    return round(ris, 1)
+    return round(ris, 1), df
 
 def get_peak_power(df, durations):
     peaks = {}
@@ -67,28 +66,70 @@ def get_peak_power(df, durations):
             peaks[f"{d}s"] = None
     return peaks
 
+def get_quarter_data(df, body_weight, cp):
+    total_secs = df['seconds'].iloc[-1]
+    split_points = [0, total_secs//4, total_secs//2, 3*total_secs//4, total_secs+1]
+    quarters = []
+    for i in range(4):
+        qdf = df[(df['seconds'] >= split_points[i]) & (df['seconds'] < split_points[i+1])]
+        duration = len(qdf)
+        kjs = qdf['power'].fillna(0).sum() / 1000
+        kj_per_kg = round(kjs / body_weight, 2)
+        ris, _ = calculate_race_impact(qdf, cp)
+        avg_power = int(qdf['power'].mean()) if not qdf['power'].isna().all() else 0
+        quarters.append({
+            'Quarter': f'Q{i+1}',
+            'Duration (s)': duration,
+            'Avg Power (W)': avg_power,
+            'kJ/kg': kj_per_kg,
+            'RIS': ris
+        })
+    return pd.DataFrame(quarters)
+
+def detect_matches(df, cp):
+    threshold = 1.2 * cp
+    above = df['power'].fillna(0) >= threshold
+    df['match_group'] = (above != above.shift()).cumsum()
+    matches = df[above].groupby('match_group').filter(lambda x: len(x) >= 10)
+    return matches['match_group'].nunique()
+
 # --- Main Logic ---
 if fit_file:
     if not fit_file.name.lower().endswith('.fit'):
         st.error("Please upload a .fit file.")
     elif critical_power and body_weight:
         df = parse_fit(fit_file)
+        ris, df = calculate_race_impact(df, critical_power)
+        peak_5min = get_peak_power(df, [300])["300s"]
 
         st.subheader("Hero Metrics")
-        peak_5min = get_peak_power(df, [300])["300s"]
-        ris = calculate_race_impact(df, critical_power)
-
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Critical Power", f"{critical_power} W")
         col2.metric("MAP (5-min)", f"{peak_5min} W")
         col3.metric("Race Impact Score", f"{ris}")
+        col4.metric("Matches (120% CP)", detect_matches(df, critical_power))
 
         st.divider()
 
-        st.subheader("Peak Powers")
+        st.subheader("Quarter Breakdown")
+        st.dataframe(get_quarter_data(df, body_weight, critical_power))
+
+        st.divider()
+
+        st.subheader("Peak Powers (Whole Race)")
         durations = [1, 10, 30, 60, 180, 300, 720]
         peaks = get_peak_power(df, durations)
         st.table(pd.DataFrame.from_dict(peaks, orient='index', columns=['Watts']))
+
+        st.divider()
+
+        st.subheader("Time in Zone")
+        zone_counts = df['zone'].value_counts().sort_index()
+        fig, ax = plt.subplots()
+        zone_counts.plot(kind='bar', ax=ax)
+        ax.set_ylabel("Seconds")
+        ax.set_title("Time in Power Zones")
+        st.pyplot(fig)
 
         st.divider()
 
@@ -99,3 +140,4 @@ if fit_file:
         st.info("Please enter your body weight and critical power.")
 else:
     st.info("Upload a .fit file to begin analysis.")
+
